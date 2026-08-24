@@ -1,7 +1,5 @@
 # Better Call Saul
 
-A weather API gateway for when your app has a problem and knows a guy who knows a guy.
-
 Your app wants the weather in Budapest. It does not care that OpenWeather returns:
 
 ```json

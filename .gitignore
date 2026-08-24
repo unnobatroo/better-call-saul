@@ -6,9 +6,11 @@ __pycache__/
 build/
 dist/
 
-# Environments / secrets
+# Secrets — never commit
 .env
 .env.*
+
+# Keep the template committed
 !.env.example
 
 # Virtual envs
