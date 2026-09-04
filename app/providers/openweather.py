@@ -1,8 +1,32 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import overload
 
 from app.config import settings
 from app.http import get_json
-from app.providers.base import WeatherProvider, WeatherReport
+from app.providers.base import ProviderResponseError, WeatherProvider, WeatherReport
+
+
+def _mapping(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ProviderResponseError(f"OpenWeather response field '{field}' is malformed")
+    return value
+
+
+@overload
+def _number(value: object, field: str, *, required: True) -> float: ...
+
+
+@overload
+def _number(value: object, field: str, *, required: bool = False) -> float | None: ...
+
+
+def _number(value: object, field: str, *, required: bool = False) -> float | None:
+    if value is None and not required:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ProviderResponseError(f"OpenWeather response field '{field}' is malformed")
+    return float(value)
 
 
 class OpenWeatherProvider(WeatherProvider):
@@ -30,13 +54,13 @@ class OpenWeatherProvider(WeatherProvider):
             params["lon"] = lon
 
         data = await get_json("https://api.openweathermap.org/data/2.5/weather", params)
-        main = data.get("main", {})
-        wind = data.get("wind", {})
+        main = _mapping(data.get("main", {}), "main")
+        wind = _mapping(data.get("wind", {}), "wind")
         return WeatherReport(
-            temperature_c=main.get("temp", 0.0),
-            humidity_percent=main.get("humidity"),
-            pressure_hpa=main.get("pressure"),
-            wind_speed_ms=wind.get("speed"),
+            temperature_c=_number(main.get("temp"), "main.temp", required=True),
+            humidity_percent=_number(main.get("humidity"), "main.humidity"),
+            pressure_hpa=_number(main.get("pressure"), "main.pressure"),
+            wind_speed_ms=_number(wind.get("speed"), "wind.speed"),
             source=self.name,
             timestamp=datetime.now(UTC),
         )

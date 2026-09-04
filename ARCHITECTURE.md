@@ -162,6 +162,11 @@ The container installs the dependencies, copies the app, and stores SQLite under
 
 The application only needs outbound access to the configured weather providers. No analytics service, telemetry backend, or Madrigal Electromotive subsidiary is hiding behind it.
 
+Provider adapters validate upstream JSON and translate malformed responses into
+provider failures before they reach the API boundary. Cache payloads and
+metrics use explicit typed shapes; circuit-breaker and statistics state remain
+lightweight in-process dataclasses.
+
 ## Deliberately missing
 
 There is **no authentication** because this is a gateway demo, not a user platform. There is **no ML** because real latency and reliability measurements already solve the routing problem well enough. There is **no shared multi-process state**, so provider stats and circuit breakers belong to each worker independently. There are also **no migrations** because the database currently consists of one table created on startup. Bringing in Alembic for that would be the architectural equivalent of constructing a superlab to make instant coffee.

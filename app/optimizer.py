@@ -1,12 +1,13 @@
 import time
+from typing import TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import get_cached, set_cached
 from app.circuit_breaker import CircuitBreaker
-from app.providers import PROVIDERS
+from app.providers import PROVIDERS, ProviderResponseError
 from app.router import rank_providers
-from app.schemas import WeatherRequest, WeatherResponse
+from app.schemas import WeatherPayload, WeatherRequest, WeatherResponse
 from app.stats import ProviderStats
 
 
@@ -16,6 +17,16 @@ class ProviderUnavailableError(Exception):
 
 class UpstreamError(Exception):
     """Every provider errored while handling the request."""
+
+
+class ProviderMetrics(TypedDict):
+    configured: bool
+    cost: float
+    successes: int
+    failures: int
+    success_rate: float | None
+    avg_latency_ms: float | None
+    total_cost: float
 
 
 class WeatherOptimizer:
@@ -42,24 +53,30 @@ class WeatherOptimizer:
         if not configured:
             raise ProviderUnavailableError("no weather providers are configured")
 
-        transient_error: Exception | None = None
-        shape_error: ValueError | None = None
-        open_count = 0
+        last_transient_error: Exception | None = None
+        last_shape_error: ValueError | None = None
+        skipped_count = 0
 
         for provider in rank_providers(request.strategy, configured, self.stats):
             breaker = self.breakers[provider.name]
             if breaker.is_open():
-                open_count += 1
+                skipped_count += 1
                 continue
 
             start = time.perf_counter()
             try:
                 data = await provider.fetch(request.city, request.lat, request.lon)
-            except ValueError as exc:
-                shape_error = exc
+            except ProviderResponseError as exc:
+                last_transient_error = exc
+                breaker.record_failure()
+                self.stats[provider.name].record_failure()
                 continue
+            except ValueError as exc:
+                last_shape_error = exc
+                continue
+            # Provider implementations are an extension boundary.
             except Exception as exc:
-                transient_error = exc
+                last_transient_error = exc
                 breaker.record_failure()
                 self.stats[provider.name].record_failure()
                 continue
@@ -68,18 +85,19 @@ class WeatherOptimizer:
             breaker.record_success()
             self.stats[provider.name].record_success(latency_ms, provider.cost)
 
-            await set_cached(db, key, data.model_dump(mode="json"), request.freshness_seconds)
-            return WeatherResponse(**data.model_dump(), cached=False)
+            payload = WeatherPayload(data.model_dump(mode="json"))
+            await set_cached(db, key, payload, request.freshness_seconds)
+            return WeatherResponse.model_validate({**payload, "cached": False})
 
-        if transient_error is not None:
-            raise UpstreamError("all providers failed") from transient_error
-        if open_count:
+        if last_transient_error is not None:
+            raise UpstreamError("all providers failed") from last_transient_error
+        if skipped_count:
             raise ProviderUnavailableError("all providers are temporarily unavailable")
-        if shape_error is not None:
-            raise shape_error
+        if last_shape_error is not None:
+            raise last_shape_error
         raise ProviderUnavailableError("no provider could handle this request")
 
-    def stats_snapshot(self) -> dict:
+    def stats_snapshot(self) -> dict[str, ProviderMetrics]:
         return {
             provider.name: {
                 "configured": provider.is_configured,

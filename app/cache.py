@@ -5,9 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import CacheEntry
+from app.schemas import WeatherPayload
 
 
-async def get_cached(db: AsyncSession, key: str) -> dict | None:
+async def get_cached(db: AsyncSession, key: str) -> WeatherPayload | None:
     result = await db.execute(
         select(CacheEntry.response).where(
             CacheEntry.cache_key == key,
@@ -18,7 +19,10 @@ async def get_cached(db: AsyncSession, key: str) -> dict | None:
 
 
 async def set_cached(
-    db: AsyncSession, key: str, response: dict, ttl_seconds: int | None = None
+    db: AsyncSession,
+    key: str,
+    response: WeatherPayload,
+    ttl_seconds: int | None = None,
 ) -> None:
     ttl = ttl_seconds if ttl_seconds is not None else settings.cache_ttl_seconds
     result = await db.execute(select(CacheEntry).where(CacheEntry.cache_key == key))

@@ -5,6 +5,10 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict
 
 
+class ProviderResponseError(ValueError):
+    """An upstream response cannot be interpreted by its provider adapter."""
+
+
 class WeatherReport(BaseModel):
     """The single format every provider is adapted to."""
 

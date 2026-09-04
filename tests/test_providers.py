@@ -1,6 +1,7 @@
 import pytest
 
 from app.providers.nasa_power import NasaPowerProvider
+from app.providers.openweather import OpenWeatherProvider
 
 
 @pytest.mark.asyncio
@@ -36,3 +37,16 @@ async def test_nasa_all_fill_values_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="no temperature data"):
         await NasaPowerProvider().fetch(None, 47.49, 19.04)
+
+
+@pytest.mark.asyncio
+async def test_openweather_rejects_malformed_response(monkeypatch):
+    async def fake_get_json(url, params=None):
+        return {"main": {"temp": "warm"}}
+
+    monkeypatch.setattr("app.providers.openweather.get_json", fake_get_json)
+    provider = OpenWeatherProvider()
+    monkeypatch.setattr(provider, "api_key", "test-key")
+
+    with pytest.raises(ValueError, match="main.temp"):
+        await provider.fetch("budapest", None, None)

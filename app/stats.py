@@ -1,4 +1,13 @@
 from dataclasses import dataclass
+from typing import TypedDict
+
+
+class StatsSnapshot(TypedDict):
+    successes: int
+    failures: int
+    success_rate: float | None
+    avg_latency_ms: float | None
+    total_cost: float
 
 
 @dataclass
@@ -27,7 +36,7 @@ class ProviderStats:
     def avg_latency_ms(self) -> float | None:
         return self.total_latency_ms / self.successes if self.successes else None
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> StatsSnapshot:
         return {
             "successes": self.successes,
             "failures": self.failures,

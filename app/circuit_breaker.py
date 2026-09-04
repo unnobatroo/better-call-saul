@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from app.config import settings
 
 
-@dataclass
+@dataclass(slots=True)
 class CircuitBreaker:
     """Fail fast against a broken provider, then probe periodically to recover."""
 

@@ -5,8 +5,8 @@ from fastapi import FastAPI, HTTPException, Query, status
 
 from app.database import Base, SessionDep, engine
 from app.http import close as close_http
-from app.optimizer import ProviderUnavailableError, UpstreamError, optimizer
-from app.schemas import WeatherRequest, WeatherResponse
+from app.optimizer import ProviderMetrics, ProviderUnavailableError, UpstreamError, optimizer
+from app.schemas import HealthResponse, WeatherRequest, WeatherResponse
 
 
 @asynccontextmanager
@@ -22,12 +22,12 @@ app = FastAPI(title="API Optimizer", version="0.4.0", lifespan=lifespan)
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health() -> HealthResponse:
     return {"status": "ok"}
 
 
 @app.get("/metrics")
-async def metrics() -> dict:
+async def metrics() -> dict[str, ProviderMetrics]:
     return optimizer.stats_snapshot()
 
 

@@ -89,6 +89,13 @@ async def test_weather_missing_location(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_weather_no_configured_providers(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(optimizer, "providers", [])
+    response = await client.get("/weather?city=budapest")
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_weather_invalid_strategy(client: AsyncClient):
     response = await client.get("/weather?city=budapest&strategy=bogus")
     assert response.status_code == 422

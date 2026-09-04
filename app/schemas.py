@@ -1,9 +1,22 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 Strategy = Literal["cheap", "fast", "reliable"]
+
+
+class WeatherPayload(TypedDict):
+    temperature_c: float
+    humidity_percent: float | None
+    pressure_hpa: float | None
+    wind_speed_ms: float | None
+    source: str
+    timestamp: str
+
+
+class HealthResponse(TypedDict):
+    status: str
 
 
 class WeatherRequest(BaseModel):
