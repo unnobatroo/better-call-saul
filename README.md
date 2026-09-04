@@ -1,67 +1,85 @@
 # Better Call Saul
 
-Your app wants the weather in Budapest. It does not care that OpenWeather returns:
+A small weather API gateway that hides provider-specific formats behind one consistent interface.
+
+OpenWeather might return:
 
 ```json
 {"main": {"temp": 26}}
 ```
 
-while NASA POWER returns:
+while NASA POWER returns something closer to:
 
 ```json
 {"properties": {"parameter": {"T2M": {"20260821": 26.4}}}}
 ```
 
-It just wants one clean response. Better Call Saul handles the mess in between: it calls providers, normalizes their responses, caches results, tracks reliability and latency, and falls back to another provider when one stops answering.
+Better Call Saul handles that difference for the client. It queries weather providers, normalizes their responses, caches results, tracks provider performance, and falls back when a provider is unavailable.
 
-## What it solves
+## What it does
 
-Three things matter here: avoid duplicate upstream calls, survive provider failures, and choose providers using actual measurements instead of hardcoded assumptions. If ten clients request the same weather data, one cached result should be enough. If one provider dies, the gateway should quietly call somebody else. If one provider is consistently faster or more reliable, the router should learn that from real requests.
+The gateway focuses on three things:
+
+- avoiding unnecessary upstream requests through caching
+- handling provider failures without breaking the client request
+- ranking providers using observed latency and reliability
+
+If several clients request the same recent weather data, the cached result can be reused. If one provider fails, the gateway tries another. Over time, provider statistics are used to make better routing decisions.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client["Your app"] --> Saul["Saul Goodman<br/>FastAPI gateway"]
-    Saul --> Cache["Ice Station Zebra<br/>SQLite cache"]
-    Saul --> Gus["Gustavo Fring<br/>provider strategy"]
-    Gus --> Mike["Mike Ehrmantraut<br/>circuit breakers"]
-    Mike --> OW["OpenWeather"]
-    Mike --> NASA["NASA POWER"]
+    Client["Client"] --> Saul["FastAPI gateway"]
+    Saul --> Cache["SQLite cache"]
+    Saul --> Router["Provider router"]
+    Router --> CB["Circuit breakers"]
+    CB --> OW["OpenWeather"]
+    CB --> NASA["NASA POWER"]
     Saul --> Metrics["/metrics"]
 ```
 
-The client only deals with Saul. Gus ranks the providers, Mike keeps unreliable ones out, and Ice Station Zebra stores recent results. Every provider sits behind the same `WeatherProvider` interface and returns the same `WeatherReport` model.
+The client only communicates with the gateway.
+
+Each provider implements the same `WeatherProvider` interface and converts its upstream response into a common `WeatherReport` model. Provider selection, caching, failure handling, and metrics remain internal to the application.
 
 ## Request flow
 
 ```mermaid
 sequenceDiagram
-    participant App as Your app
-    participant Saul as Saul
-    participant Cache as Ice Station Zebra
-    participant Provider as Providers
+    participant Client
+    participant API as Gateway
+    participant Cache
+    participant Provider
 
-    App->>Saul: GET /weather
-    Saul->>Cache: cached?
+    Client->>API: GET /weather
+    API->>Cache: Check cache
 
-    alt cache hit
-        Cache-->>Saul: result
-        Saul-->>App: 200 cached=true
-    else cache miss
-        Saul->>Provider: call best provider
+    alt Cache hit
+        Cache-->>API: Cached result
+        API-->>Client: 200 cached=true
+    else Cache miss
+        API->>Provider: Call highest-ranked provider
 
-        alt provider fails
-            Saul->>Provider: call next guy
+        alt Provider fails
+            API->>Provider: Try next provider
         end
 
-        Provider-->>Saul: weather data
-        Saul->>Cache: save result
-        Saul-->>App: 200 cached=false
+        Provider-->>API: Weather data
+        API->>Cache: Store result
+        API-->>Client: 200 cached=false
     end
 ```
 
-In practice: check the cache, rank providers, call the best one, fall back if needed, normalize the result, cache it, return it.
+In short:
+
+1. check the cache
+2. rank available providers
+3. query the highest-ranked provider
+4. fall back if necessary
+5. normalize the response
+6. cache it
+7. return it
 
 ## Design
 
@@ -111,16 +129,39 @@ classDiagram
     WeatherOptimizer --> WeatherProvider
 ```
 
-- **Saul - facade.** The client calls `/weather` and does not need to know anything about provider schemas, failures, retries, or caching.
-- **Gus - strategy.** Providers can be ranked by `cheap`, `fast`, or `reliable`. The ordering comes from actual performance data.
-- **Mike - circuit breaker.** If a provider keeps failing, Mike temporarily stops sending requests to it. No half measures.
-- **Fallback.** If the first provider fails, Saul calls another guy. If everybody disappears, then we start asking about a Hoover MaxExtract PressurePro model 60.
-- **Adapters.** Every provider converts its own response into the same `WeatherReport`, so the rest of the code does not care where the data came from.
-- **Ice Station Zebra - cache.** Recent responses are stored in SQLite, so repeated requests do not automatically mean repeated API calls. For tax purposes, obviously.
+### Provider adapters
+
+Each weather service has its own response format. Provider adapters translate those responses into the shared `WeatherReport` model, so the rest of the application does not depend on provider-specific schemas.
+
+### Provider routing
+
+Providers can be ranked using three strategies:
+
+- `cheap`
+- `fast`
+- `reliable`
+
+Static provider characteristics are used initially. As requests are processed, observed latency and success rates are used instead.
+
+### Circuit breakers
+
+Each provider has a circuit breaker. Repeated failures temporarily remove a provider from consideration, preventing the gateway from repeatedly calling an upstream service that is already failing.
+
+Mike would approve.
+
+### Fallback
+
+If the preferred provider fails, the gateway tries the next available provider.
+
+The client does not need to implement its own provider fallback logic.
+
+### Cache
+
+Recent weather responses are stored in SQLite. The `freshness_seconds` parameter controls how long a cached result can be reused.
 
 ## Running it
 
-NASA POWER works without an API key:
+NASA POWER does not require an API key.
 
 ```bash
 docker build -t better-call-saul .
@@ -131,11 +172,13 @@ docker run --rm \
   better-call-saul
 ```
 
-Example:
+Example request:
 
 ```bash
 curl "http://localhost:8000/weather?lat=47.49&lon=19.04"
 ```
+
+Example response:
 
 ```json
 {
@@ -148,7 +191,7 @@ curl "http://localhost:8000/weather?lat=47.49&lon=19.04"
 }
 ```
 
-For OpenWeather:
+To enable OpenWeather:
 
 ```bash
 docker run --rm \
@@ -168,25 +211,40 @@ uvicorn app.main:app --reload
 ## API
 
 | Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/weather` | Get weather data |
-| `GET` | `/metrics` | Provider performance stats |
-| `GET` | `/health` | Check whether Saul is still practicing law |
+| --- | --- | --- |
+| `GET` | `/weather` | Retrieve weather data |
+| `GET` | `/metrics` | View provider performance statistics |
+| `GET` | `/health` | Health check |
 
-`/weather` supports `city`, `lat`, `lon`, `strategy=cheap|fast|reliable`, and `freshness_seconds`. FastAPI docs are available at `/docs`.
+`/weather` accepts:
+
+- `city`
+- `lat`
+- `lon`
+- `strategy=cheap|fast|reliable`
+- `freshness_seconds`
+
+Interactive FastAPI documentation is available at `/docs`.
 
 ## Does it learn?
 
-Not in the ML sense. The gateway records success rate, latency, and failures, then uses those measurements to rank providers. If one gets worse, Mike notices. If another becomes faster, Gus moves it up. No neural networks, no `"AI-powered"` sticker, just measurements.
+Only in a limited sense.
+
+The gateway records provider latency, successes, and failures and uses those measurements when ranking providers. There is no machine learning involved.
+
+A provider that becomes slower or less reliable will gradually rank lower. A provider that performs better can move up.
 
 ## Providers
 
-Currently: OpenWeather and NASA POWER. Adding another provider just means implementing `WeatherProvider`. Saul, Gus, and Mike stay untouched.
+Currently supported:
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the detailed system design.
+- OpenWeather
+- NASA POWER
+
+Adding another provider requires implementing the `WeatherProvider` interface and converting its response into `WeatherReport`.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for more detail.
 
 ## License
 
 [MIT](LICENSE)
-
-*Not affiliated with Saul Goodman & Associates, Madrigal Electromotive GmbH, Los Pollos Hermanos, or Ice Station Zebra Associates. Go Land Crabs.*
