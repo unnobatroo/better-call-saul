@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from typing_extensions import TypedDict
 
 Strategy = Literal["cheap", "fast", "reliable"]
 

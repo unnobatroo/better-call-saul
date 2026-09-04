@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import TypedDict
+
+from typing_extensions import TypedDict
 
 
 class StatsSnapshot(TypedDict):

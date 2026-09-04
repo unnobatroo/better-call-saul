@@ -1,7 +1,7 @@
 import time
-from typing import TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import TypedDict
 
 from app.cache import get_cached, set_cached
 from app.circuit_breaker import CircuitBreaker
